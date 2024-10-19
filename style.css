@@ -1,0 +1,16 @@
+body {
+    font-family: Arial, sans-serif;
+}
+
+header {
+    margin-bottom: 20px;
+}
+
+.card {
+    border-radius: 10px;
+}
+
+canvas {
+    width: 100% !important; /* Important to override inline styles */
+    height: 300px !important; /* Increased height for better visibility */
+}
