@@ -1,0 +1,60 @@
+-- Create database
+CREATE DATABASE IF NOT EXISTS water_supply_db;
+
+-- Use the database
+USE water_supply_db;
+
+-- Create sensor_data table
+CREATE TABLE IF NOT EXISTS sensor_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    water_flow FLOAT NOT NULL,
+    pressure FLOAT NOT NULL,
+    quality FLOAT NOT NULL,
+    consumption FLOAT NOT NULL,
+    timestamp DATETIME NOT NULL,
+    INDEX idx_timestamp (timestamp)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Insert sample test data
+INSERT INTO sensor_data (water_flow, pressure, quality, consumption, timestamp) VALUES
+(15.5, 450.0, 7.2, 155.0, DATE_SUB(NOW(), INTERVAL 50 MINUTE)),
+(16.2, 465.0, 7.1, 162.0, DATE_SUB(NOW(), INTERVAL 40 MINUTE)),
+(14.8, 442.0, 7.3, 148.0, DATE_SUB(NOW(), INTERVAL 30 MINUTE)),
+(15.9, 455.0, 7.0, 159.0, DATE_SUB(NOW(), INTERVAL 20 MINUTE)),
+(16.5, 470.0, 7.2, 165.0, DATE_SUB(NOW(), INTERVAL 10 MINUTE)),
+
+-- Last 24 hours data
+(17.2, 480.0, 7.4, 172.0, DATE_SUB(NOW(), INTERVAL 23 HOUR)),
+(16.8, 475.0, 7.3, 168.0, DATE_SUB(NOW(), INTERVAL 22 HOUR)),
+(15.5, 460.0, 7.1, 155.0, DATE_SUB(NOW(), INTERVAL 21 HOUR)),
+(16.0, 465.0, 7.2, 160.0, DATE_SUB(NOW(), INTERVAL 20 HOUR)),
+(15.8, 458.0, 7.0, 158.0, DATE_SUB(NOW(), INTERVAL 19 HOUR)),
+(16.3, 468.0, 7.3, 163.0, DATE_SUB(NOW(), INTERVAL 18 HOUR)),
+(17.0, 478.0, 7.4, 170.0, DATE_SUB(NOW(), INTERVAL 17 HOUR)),
+(16.5, 472.0, 7.2, 165.0, DATE_SUB(NOW(), INTERVAL 16 HOUR)),
+(15.9, 462.0, 7.1, 159.0, DATE_SUB(NOW(), INTERVAL 15 HOUR)),
+(16.2, 467.0, 7.3, 162.0, DATE_SUB(NOW(), INTERVAL 14 HOUR)),
+
+-- Last week data
+(18.0, 485.0, 7.5, 180.0, DATE_SUB(NOW(), INTERVAL 6 DAY)),
+(17.5, 480.0, 7.4, 175.0, DATE_SUB(NOW(), INTERVAL 5 DAY)),
+(16.8, 470.0, 7.2, 168.0, DATE_SUB(NOW(), INTERVAL 4 DAY)),
+(16.2, 465.0, 7.1, 162.0, DATE_SUB(NOW(), INTERVAL 3 DAY)),
+(17.0, 475.0, 7.3, 170.0, DATE_SUB(NOW(), INTERVAL 2 DAY)),
+(16.5, 468.0, 7.2, 165.0, DATE_SUB(NOW(), INTERVAL 1 DAY)),
+
+-- Last month data
+(19.0, 490.0, 7.6, 190.0, DATE_SUB(NOW(), INTERVAL 28 DAY)),
+(18.5, 485.0, 7.5, 185.0, DATE_SUB(NOW(), INTERVAL 25 DAY)),
+(17.8, 478.0, 7.4, 178.0, DATE_SUB(NOW(), INTERVAL 22 DAY)),
+(17.2, 472.0, 7.3, 172.0, DATE_SUB(NOW(), INTERVAL 19 DAY)),
+(16.8, 468.0, 7.2, 168.0, DATE_SUB(NOW(), INTERVAL 16 DAY)),
+(17.5, 475.0, 7.4, 175.0, DATE_SUB(NOW(), INTERVAL 13 DAY)),
+(18.0, 480.0, 7.5, 180.0, DATE_SUB(NOW(), INTERVAL 10 DAY)),
+(17.3, 473.0, 7.3, 173.0, DATE_SUB(NOW(), INTERVAL 7 DAY));
+
+-- Verify data insertion
+SELECT COUNT(*) as total_records FROM sensor_data;
+
+-- Show latest 5 records
+SELECT * FROM sensor_data ORDER BY timestamp DESC LIMIT 5;
