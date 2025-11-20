@@ -1,111 +1,273 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <PubSubClient.h>
+#include <ArduinoJson.h>
 
-// Wi-Fi credentials
-const char* ssid = "your_SSID"; // Replace with your Wi-Fi SSID
-const char* password = "your_PASSWORD"; // Replace with your Wi-Fi password
+// WiFi credentials
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
 
-// Define the HTTP endpoint for your PHP script
-const char* serverUrl = "http://localhost/insert_data.php"; // Update with your XAMPP URL if needed
+// Server endpoint
+const char* serverUrl = "http://YOUR_SERVER_IP/insert_data.php";
 
-// Initialize Wi-Fi and MQTT client
-WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
+// Pin definitions
+const int FLOW_SENSOR_PIN = 4;
+const int PRESSURE_SENSOR_PIN = 34;
+const int PH_SENSOR_PIN = 35;
 
-// Define pins for sensors
-#define FLOW_SENSOR_PIN 2
-#define PRESSURE_SENSOR_PIN 34 // Example GPIO pin for pressure sensor
-#define PH_SENSOR_PIN 35      // Example GPIO pin for pH sensor
+// Flow sensor variables
+volatile int pulseCount = 0;
+float calibrationFactor = 7.5; // 7.5 pulses per L/min
+unsigned long oldTime = 0;
+unsigned long totalVolume = 0;
 
-// Define a struct to hold all sensor readings
+// Data structure
 struct SensorData {
-    float flowRate;   // Flow rate in L/min
-    float pressure;   // Pressure in kPa
-    float pH;        // pH level
+  float flowRate;
+  float pressure;
+  float pH;
+  float consumption;
+  unsigned long timestamp;
 };
 
-// Create an instance of the struct
-SensorData sensorData;
+SensorData currentData;
 
-// Variables for flow sensor
-volatile int flowFrequency = 0;
-
-// Timing variables
-unsigned long currentTime;
-unsigned long previousTime;
-
-void flow() {
-    flowFrequency++;
+// Interrupt service routine for flow sensor
+void IRAM_ATTR pulseCounter() {
+  pulseCount++;
 }
 
 void setup() {
-    pinMode(FLOW_SENSOR_PIN, INPUT);
-    digitalWrite(FLOW_SENSOR_PIN, HIGH); // Optional internal pull-up
-    
-    Serial.begin(115200);
-
-    // Connect to Wi-Fi
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(1000);
-        Serial.println("Connecting to WiFi...");
-    }
-    Serial.println("Connected to WiFi");
-
-    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), flow, RISING);
-    
-    currentTime = millis();
-    previousTime = currentTime;
+  Serial.begin(115200);
+  delay(1000);
+  
+  Serial.println("\n=== Water Supply Management System ===");
+  Serial.println("Initializing...");
+  
+  // Initialize pins
+  pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(PRESSURE_SENSOR_PIN, INPUT);
+  pinMode(PH_SENSOR_PIN, INPUT);
+  
+  // Attach interrupt for flow sensor
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+  
+  // Connect to WiFi
+  connectWiFi();
+  
+  Serial.println("System Ready!");
+  Serial.println("Reading sensors every 10 minutes...\n");
 }
 
 void loop() {
-    currentTime = millis();
+  // Read sensors every 10 minutes (600000 ms)
+  static unsigned long lastReadTime = 0;
+  unsigned long currentTime = millis();
+  
+  if (currentTime - lastReadTime >= 600000 || lastReadTime == 0) {
+    lastReadTime = currentTime;
+    
+    // Read all sensors
+    readSensors();
+    
+    // Display readings
+    displayReadings();
+    
+    // Send data to server
+    sendDataToServer();
+  }
+  
+  // Check WiFi connection
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi disconnected. Reconnecting...");
+    connectWiFi();
+  }
+  
+  delay(1000);
+}
 
-    if (currentTime - previousTime >= 600000) { // Update every 10 minutes (600000 ms)
-        previousTime = currentTime;
+void connectWiFi() {
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(ssid);
+  
+  WiFi.begin(ssid, password);
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi Connection Failed!");
+  }
+}
 
-        // Calculate flow rate (L/min)
-        sensorData.flowRate = (flowFrequency / 7.5);
-        
-        // Read pressure from the pressure sensor
-        int pressureValue = analogRead(PRESSURE_SENSOR_PIN);
-        float voltage = pressureValue * (5.0 / 1023.0);
-        sensorData.pressure = (voltage - 0.2) * (700 / (4.7 - 0.2)); // Adjust based on calibration
+void readSensors() {
+  Serial.println("\n--- Reading Sensors ---");
+  
+  // Read flow rate
+  currentData.flowRate = readFlowRate();
+  
+  // Read pressure
+  currentData.pressure = readPressure();
+  
+  // Read pH
+  currentData.pH = readPH();
+  
+  // Calculate consumption (flow rate × 10 minutes)
+  currentData.consumption = currentData.flowRate * 10.0;
+  
+  // Update total volume
+  totalVolume += (unsigned long)currentData.consumption;
+  
+  // Store timestamp
+  currentData.timestamp = millis();
+}
 
-        // Read pH value from the pH sensor
-        int pHValue = analogRead(PH_SENSOR_PIN);
-        float voltagePH = pHValue * (5.0 / 1023.0);
-        sensorData.pH = voltagePH * 3.5; // Adjust based on calibration
+float readFlowRate() {
+  // Calculate flow rate based on pulse count
+  // Flow rate (L/min) = pulse frequency / calibration factor
+  
+  unsigned long currentTime = millis();
+  unsigned long elapsedTime = currentTime - oldTime;
+  
+  if (elapsedTime >= 1000) { // Calculate every second
+    float frequency = (float)pulseCount / (elapsedTime / 1000.0);
+    float flowRate = frequency / calibrationFactor;
+    
+    oldTime = currentTime;
+    pulseCount = 0;
+    
+    return flowRate;
+  }
+  
+  return 0.0;
+}
 
-        // Prepare JSON payload
-        String payload = "{\"flowRate\":" + String(sensorData.flowRate) +
-                         ",\"pressure\":" + String(sensorData.pressure) +
-                         ",\"pH\":" + String(sensorData.pH) + "}";
+float readPressure() {
+  // Read analog value from pressure sensor
+  int analogValue = analogRead(PRESSURE_SENSOR_PIN);
+  
+  // Convert to voltage (ESP32 ADC: 0-4095 = 0-3.3V)
+  float voltage = (analogValue / 4095.0) * 3.3;
+  
+  // Convert voltage to pressure (0.2-4.7V = 0-700 kPa)
+  // Linear interpolation
+  float pressure = 0.0;
+  
+  if (voltage >= 0.2 && voltage <= 4.7) {
+    pressure = ((voltage - 0.2) / (4.7 - 0.2)) * 700.0;
+  }
+  
+  return pressure;
+}
 
-        // Send data to PHP script
-        if (WiFi.status() == WL_CONNECTED) {
-            HTTPClient http;
-            http.begin(serverUrl); // Use the server URL for your PHP script
-            http.addHeader("Content-Type", "application/json");
+float readPH() {
+  // Read analog value from pH sensor
+  int analogValue = analogRead(PH_SENSOR_PIN);
+  
+  // Convert to voltage
+  float voltage = (analogValue / 4095.0) * 3.3;
+  
+  // Convert voltage to pH (assuming linear: 0V=0pH, 3.3V=14pH)
+  // Adjust calibration based on your specific pH sensor
+  float pH = (voltage / 3.3) * 14.0;
+  
+  // Constrain to valid pH range
+  pH = constrain(pH, 0.0, 14.0);
+  
+  return pH;
+}
 
-            int httpResponseCode = http.POST(payload);
+void displayReadings() {
+  Serial.println("\n=== Sensor Readings ===");
+  Serial.print("Flow Rate: ");
+  Serial.print(currentData.flowRate, 2);
+  Serial.println(" L/min");
+  
+  Serial.print("Pressure: ");
+  Serial.print(currentData.pressure, 2);
+  Serial.println(" kPa");
+  
+  Serial.print("pH Level: ");
+  Serial.println(currentData.pH, 2);
+  
+  Serial.print("Consumption (10 min): ");
+  Serial.print(currentData.consumption, 2);
+  Serial.println(" L");
+  
+  Serial.print("Total Volume: ");
+  Serial.print(totalVolume);
+  Serial.println(" L");
+  
+  Serial.println("=======================\n");
+}
 
-            if (httpResponseCode > 0) {
-                Serial.printf("HTTP Response code: %d\n", httpResponseCode);
-            } else {
-                Serial.printf("Error sending POST: %s\n", http.errorToString(httpResponseCode).c_str());
-            }
-
-            http.end();
-        }
-
-        // Reset pulse counter for next calculation
-        flowFrequency = 0;
-
-        // Print results to Serial Monitor
-        Serial.println(payload);
+void sendDataToServer() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Cannot send data: WiFi not connected");
+    return;
+  }
+  
+  Serial.println("Sending data to server...");
+  
+  HTTPClient http;
+  http.begin(serverUrl);
+  http.addHeader("Content-Type", "application/json");
+  
+  // Create JSON payload
+  StaticJsonDocument<256> doc;
+  doc["flowRate"] = currentData.flowRate;
+  doc["pressure"] = currentData.pressure;
+  doc["pH"] = currentData.pH;
+  doc["consumption"] = currentData.consumption;
+  
+  String jsonPayload;
+  serializeJson(doc, jsonPayload);
+  
+  Serial.print("JSON Payload: ");
+  Serial.println(jsonPayload);
+  
+  // Send POST request with retry logic
+  int attempts = 0;
+  int httpResponseCode = -1;
+  
+  while (attempts < 3 && httpResponseCode <= 0) {
+    httpResponseCode = http.POST(jsonPayload);
+    
+    if (httpResponseCode > 0) {
+      Serial.print("HTTP Response Code: ");
+      Serial.println(httpResponseCode);
+      
+      String response = http.getString();
+      Serial.print("Server Response: ");
+      Serial.println(response);
+      
+      if (httpResponseCode == 200) {
+        Serial.println("✓ Data sent successfully!");
+      } else {
+        Serial.println("✗ Server returned error");
+      }
+    } else {
+      attempts++;
+      Serial.print("✗ HTTP Error: ");
+      Serial.println(http.errorToString(httpResponseCode));
+      
+      if (attempts < 3) {
+        Serial.println("Retrying in 5 seconds...");
+        delay(5000);
+      }
     }
-
-    mqttClient.loop(); // Keep MQTT connection alive if you're using MQTT as well
+  }
+  
+  http.end();
+  
+  if (httpResponseCode <= 0) {
+    Serial.println("Failed to send data after 3 attempts");
+  }
 }
